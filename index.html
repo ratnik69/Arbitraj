@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>USDT/RUB Arbitrage Scanner</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070b14;
+      --panel: rgba(15, 23, 42, 0.88);
+      --border: rgba(148, 163, 184, 0.14);
+      --text: #e5eefc;
+      --muted: #8b9bb4;
+      --accent: #38bdf8;
+      --good: #34d399;
+      --bad: #f87171;
+      --warn: #fbbf24;
+      --radius: 16px;
+      --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(1100px 560px at 8% -8%, rgba(56,189,248,.14), transparent 55%),
+        radial-gradient(900px 480px at 92% 0%, rgba(52,211,153,.1), transparent 50%),
+        radial-gradient(700px 380px at 50% 100%, rgba(99,102,241,.08), transparent 50%),
+        var(--bg);
+    }
+    .app { max-width: 1400px; margin: 0 auto; padding: 20px 16px 40px; }
+    .topbar {
+      display: flex; flex-wrap: wrap; gap: 16px;
+      justify-content: space-between; align-items: center; margin-bottom: 16px;
+    }
+    .brand { display: flex; gap: 12px; align-items: center; }
+    .logo {
+      width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center;
+      font-weight: 800; font-size: 24px; color: #042f2e;
+      background: linear-gradient(135deg, #34d399, #38bdf8);
+      box-shadow: 0 8px 28px rgba(56,189,248,.35);
+    }
+    .brand h1 { margin: 0; font-size: 1.3rem; letter-spacing: -.02em; }
+    .brand p { margin: 2px 0 0; color: var(--muted); font-size: .85rem; }
+    .stats { display: grid; grid-template-columns: repeat(4, minmax(110px,1fr)); gap: 10px; }
+    .stat, .panel, .controls {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: var(--radius); backdrop-filter: blur(12px);
+      box-shadow: 0 18px 50px rgba(0,0,0,.4);
+    }
+    .stat { padding: 10px 12px; }
+    .stat span { display: block; color: var(--muted); font-size: .75rem; margin-bottom: 4px; }
+    .stat strong { font-size: 1.05rem; }
+    .layout { display: flex; flex-direction: column; gap: 14px; }
+    .controls { padding: 16px; }
+    .controls-main { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; }
+    .btn {
+      border: 0; border-radius: 12px; padding: 12px 18px; cursor: pointer;
+      font: inherit; font-weight: 700; color: #04111f;
+      background: linear-gradient(135deg, #34d399, #2dd4bf 40%, #38bdf8);
+      box-shadow: 0 10px 28px rgba(52,211,153,.25);
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn.running { animation: pulse 2s infinite; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(52,211,153,.45); }
+      50% { box-shadow: 0 0 0 10px rgba(52,211,153,0); }
+    }
+    .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .9rem; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; }
+    .dot.on { background: var(--good); box-shadow: 0 0 10px rgba(52,211,153,.8); }
+    .dot.off { background: var(--bad); }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+    .field {
+      display: flex; flex-direction: column; gap: 8px; padding: 12px;
+      border-radius: 12px; background: rgba(2,6,23,.45); border: 1px solid rgba(148,163,184,.08);
+    }
+    .field-top { display: flex; justify-content: space-between; color: var(--muted); font-size: .85rem; }
+    .field-top strong { color: var(--text); font-variant-numeric: tabular-nums; }
+    input[type=range] { width: 100%; accent-color: var(--accent); }
+    .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .seg button {
+      border: 1px solid rgba(148,163,184,.18); background: transparent; color: var(--text);
+      border-radius: 10px; padding: 8px; cursor: pointer; font: inherit;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .seg button small { color: var(--muted); }
+    .seg button.active { border-color: rgba(56,189,248,.6); background: rgba(56,189,248,.12); }
+    .panel { padding: 16px; }
+    .panel-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin-bottom: 12px; }
+    .panel-head h2 { margin: 0; font-size: 1.05rem; }
+    .muted { color: var(--muted); }
+    .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .pos { color: var(--good); }
+    .neg { color: var(--bad); }
+    .banner {
+      border-radius: 12px; padding: 12px 14px; font-size: .9rem; line-height: 1.45;
+    }
+    .banner.warn { background: rgba(251,191,36,.1); border: 1px solid rgba(251,191,36,.25); color: #fde68a; }
+    .banner.info { background: rgba(56,189,248,.08); border: 1px solid rgba(56,189,248,.2); color: #bae6fd; }
+    .table-scroll { overflow: auto; border-radius: 12px; border: 1px solid rgba(148,163,184,.1); }
+    table { width: 100%; border-collapse: collapse; min-width: 960px; font-size: .92rem; }
+    th {
+      text-align: left; padding: 10px 12px; color: var(--muted); font-weight: 600;
+      background: rgba(2,6,23,.65); position: sticky; top: 0; white-space: nowrap;
+    }
+    td { padding: 12px; border-top: 1px solid rgba(148,163,184,.08); vertical-align: top; }
+    tr:hover td { background: rgba(56,189,248,.04); }
+    .venue { font-weight: 600; }
+    .sub { color: var(--muted); font-size: .78rem; margin-top: 2px; }
+    .badge {
+      display: inline-flex; border-radius: 999px; padding: 4px 8px;
+      font-family: var(--mono); font-size: .82rem; font-weight: 600;
+    }
+    .badge.good { background: rgba(52,211,153,.15); color: #6ee7b7; }
+    .badge.ok { background: rgba(56,189,248,.15); color: #7dd3fc; }
+    .badge.low { background: rgba(251,191,36,.12); color: #fcd34d; }
+    .badge.bad { background: rgba(248,113,113,.12); color: #fca5a5; }
+    .chip {
+      display: inline-block; margin: 2px 4px 0 0; padding: 3px 7px;
+      border-radius: 8px; background: rgba(148,163,184,.12); font-size: .75rem;
+    }
+    .chip.warn { background: rgba(251,191,36,.15); color: #fcd34d; }
+    .empty {
+      padding: 28px; text-align: center; color: var(--muted);
+      border: 1px dashed rgba(148,163,184,.2); border-radius: 12px;
+    }
+    .chart-box {
+      height: 260px; border-radius: 12px; border: 1px solid rgba(148,163,184,.1);
+      background: rgba(2,6,23,.35); position: relative; overflow: hidden;
+    }
+    .chart-box canvas { width: 100%; height: 100%; display: block; }
+    .quotes { display: grid; grid-template-columns: 1fr 1.2fr; gap: 14px; }
+    .quote-list { display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow: auto; }
+    .quote-row {
+      display: flex; justify-content: space-between; gap: 12px; padding: 10px;
+      border-radius: 10px; background: rgba(2,6,23,.4); border: 1px solid rgba(148,163,184,.08);
+    }
+    .q-prices { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-family: var(--mono); font-size: .85rem; white-space: nowrap; }
+    .bid { color: #6ee7b7; }
+    .ask { color: #fca5a5; }
+    .pill { font-size: .75rem; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 4px 8px; }
+    .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .card-head h3 { margin: 0; font-size: 1rem; }
+    .best-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
+    .best-grid .label { display: block; color: var(--muted); font-size: .78rem; margin-bottom: 4px; }
+    .footer {
+      margin-top: 20px; display: flex; justify-content: space-between; gap: 10px;
+      flex-wrap: wrap; color: var(--muted); font-size: .8rem;
+    }
+    .api-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+    .api-row input[type=text] {
+      flex: 1; min-width: 220px; background: rgba(2,6,23,.55); border: 1px solid var(--border);
+      color: var(--text); border-radius: 10px; padding: 10px 12px; font: inherit;
+    }
+    .api-row .btn-sec {
+      background: rgba(148,163,184,.12); color: var(--text); border: 1px solid var(--border);
+      box-shadow: none; font-weight: 600;
+    }
+    @media (max-width: 1100px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+      .quotes { grid-template-columns: 1fr; }
+      .best-grid { grid-template-columns: 1fr 1fr; }
+      .stats { grid-template-columns: 1fr 1fr; width: 100%; }
+    }
+    @media (max-width: 720px) {
+      .grid { grid-template-columns: 1fr; }
+      .best-grid { grid-template-columns: 1fr; }
+      .app { padding: 14px 12px 28px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">₮</div>
+        <div>
+          <h1>USDT/RUB Arbitrage</h1>
+          <p>Binance · Bybit · KuCoin · P2P · BestChange</p>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat"><span>Spot mid</span><strong id="spotMid">—</strong></div>
+        <div class="stat"><span>Лучшая прибыль</span><strong id="bestProfit">—</strong></div>
+        <div class="stat"><span>Пар ≥ порога</span><strong id="oppCount">0</strong></div>
+        <div class="stat"><span>Обновлено</span><strong class="mono" id="updated">—</strong></div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="controls">
+        <div class="controls-main">
+          <button class="btn" id="btnScan" type="button">▶ Запустить сканер</button>
+          <div class="status">
+            <span class="dot" id="dotLive"></span><span id="lblLive">офлайн / demo</span>
+            <span>·</span>
+            <span class="dot" id="dotRun"></span><span id="lblRun">Стоп</span>
+          </div>
+        </div>
+        <div class="grid">
+          <label class="field">
+            <div class="field-top"><span>Мин. прибыль</span><strong id="vMin">0.30%</strong></div>
+            <input type="range" id="minProfit" min="0" max="5" step="0.05" value="0.3" />
+          </label>
+          <label class="field">
+            <div class="field-top"><span>Сумма сделки (USDT)</span><strong id="vAmt">1000</strong></div>
+            <input type="range" id="amount" min="100" max="20000" step="100" value="1000" />
+          </label>
+          <div class="field">
+            <div class="field-top"><span>Сеть вывода</span></div>
+            <div class="seg">
+              <button type="button" class="active" data-net="TRC20">TRC20<small id="feeTrc">1 USDT</small></button>
+              <button type="button" data-net="BEP20">BEP20<small id="feeBep">0.3 USDT</small></button>
+            </div>
+          </div>
+          <label class="field">
+            <div class="field-top"><span>Комиссия банка %</span><strong id="vBankPct">0.00%</strong></div>
+            <input type="range" id="bankPct" min="0" max="2" step="0.05" value="0" />
+          </label>
+          <label class="field">
+            <div class="field-top"><span>Фикс. комиссия банка ₽</span><strong id="vBankFix">0 ₽</strong></div>
+            <input type="range" id="bankFix" min="0" max="300" step="10" value="0" />
+          </label>
+          <label class="field">
+            <div class="field-top"><span>Комиссия сети TRC20</span><strong id="vTrc">1 USDT</strong></div>
+            <input type="range" id="trcFee" min="0" max="5" step="0.1" value="1" />
+          </label>
+        </div>
+        <div class="api-row">
+          <input type="text" id="apiBase" placeholder="API base (пусто = demo / localhost:3001)" />
+          <button class="btn btn-sec" id="btnConnect" type="button">Подключить API</button>
+        </div>
+      </section>
+
+      <div class="banner info" id="modeBanner">
+        Режим: <strong>локальный demo</strong>. Можно подключить бэкенд проекта
+        (<code>http://localhost:3001</code>) или оставить demo — расчёт в браузере.
+      </div>
+      <div class="banner warn" id="simBanner" hidden></div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Арбитражные пары</h2>
+          <span class="muted" id="tableHint">порог 0.3% · 1000 USDT · TRC20</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th><th>Покупка</th><th>Продажа</th><th>Цена buy</th><th>Цена sell</th>
+                <th>Спред</th><th>Чистая прибыль</th><th>₽ прибыль</th><th>Рек. сумма</th><th>Сеть</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="tableEmpty" hidden>Нет данных. Запустите сканер.</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Спред за последний час</h2>
+          <span class="muted" id="histCount">0 точек</span>
+        </div>
+        <div class="chart-box"><canvas id="chart"></canvas></div>
+      </section>
+
+      <div class="quotes">
+        <section class="panel">
+          <div class="card-head"><h3>Spot USDT/RUB</h3><span class="pill" id="spotPill">—</span></div>
+          <div class="quote-list" id="spotList"></div>
+        </section>
+        <section class="panel">
+          <div class="card-head"><h3>P2P / агрегаторы</h3><span class="pill" id="p2pPill">0 источников</span></div>
+          <div class="quote-list" id="p2pList"></div>
+        </section>
+      </div>
+
+      <section class="panel" id="bestPanel" hidden>
+        <div class="panel-head"><h2>Лучший маршрут</h2></div>
+        <div class="best-grid" id="bestGrid"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Один HTML-файл · demo в браузере или API бэкенда</span>
+      <span>Прототип · не финансовый совет</span>
+    </footer>
+  </div>
+
+  <script>
+  (() => {
+    const FEES_EX = {
+      binance: { taker: 0.001, name: 'Binance' },
+      bybit: { taker: 0.001, name: 'Bybit' },
+      kucoin: { taker: 0.001, name: 'KuCoin' },
+      rapira: { taker: 0.001, name: 'Rapira' },
+      yobit: { taker: 0.002, name: 'YoBit' },
+      p2p_binance: { taker: 0, name: 'Binance P2P' },
+      p2p_bybit: { taker: 0, name: 'Bybit P2P' },
+      p2p_kucoin: { taker: 0, name: 'KuCoin P2P' },
+      bestchange: { taker: 0, name: 'BestChange' },
+    };
+
+    const state = {
+      mode: 'demo', // demo | api
+      running: false,
+      connected: false,
+      apiBase: localStorage.getItem('arb_api') || '',
+      network: 'TRC20',
+      minProfitPct: 0.3,
+      amountUsdt: 1000,
+      fees: { trc20Usdt: 1, bep20Usdt: 0.3, bankPct: 0, bankFixedRub: 0 },
+      quotes: [],
+      opportunities: [],
+      best: null,
+      spotMid: null,
+      history: [],
+      meta: {},
+      timer: null,
+      ws: null,
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n, d = 2) =>
+      n == null || Number.isNaN(n)
+        ? '—'
+        : Number(n).toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d });
+    const fmtTime = (ts) => (ts ? new Date(ts).toLocaleTimeString('ru-RU') : '—');
+
+    function venue(q) {
+      const base = FEES_EX[q.exchange]?.name || q.name || q.exchange;
+      if (q.type === 'p2p' && q.bankName) return `${base} (${q.bankName})`;
+      if (q.type === 'spot') return `${base} Spot`;
+      return base;
+    }
+
+    function calcPair(buyQ, sellQ) {
+      if (
+        buyQ.exchange === sellQ.exchange &&
+        buyQ.type === sellQ.type &&
+        (buyQ.bank || '') === (sellQ.bank || '')
+      ) return null;
+
+      const buyPrice = buyQ.ask;
+      const sellPrice = sellQ.bid;
+      if (!(buyPrice > 0 && sellPrice > 0)) return null;
+      const raw = ((sellPrice - buyPrice) / buyPrice) * 100;
+      if (raw > 8 || raw < -25) return null;
+
+      const amount = state.amountUsdt;
+      const netFee = state.network === 'BEP20' ? state.fees.bep20Usdt : state.fees.trc20Usdt;
+      const buyT = FEES_EX[buyQ.exchange]?.taker ?? 0.001;
+      const sellT = FEES_EX[sellQ.exchange]?.taker ?? 0.001;
+
+      const grossBuy = amount * buyPrice;
+      const buyExFee = grossBuy * buyT;
+      const buyBank = grossBuy * (state.fees.bankPct / 100) + state.fees.bankFixedRub;
+      const totalCost = grossBuy + buyExFee + buyBank;
+
+      const after = Math.max(amount - netFee, 0);
+      if (after <= 0) return null;
+      const grossSell = after * sellPrice;
+      const sellExFee = grossSell * sellT;
+      const sellBank = grossSell * (state.fees.bankPct / 100) + state.fees.bankFixedRub;
+      const proceeds = grossSell - sellExFee - sellBank;
+
+      const profitRub = proceeds - totalCost;
+      const profitPct = (profitRub / totalCost) * 100;
+      const spreadPct = ((sellPrice - buyPrice) / buyPrice) * 100;
+
+      const spreadPer = sellPrice * (1 - sellT) - buyPrice * (1 + buyT);
+      let recommended = amount;
+      if (spreadPer > 0) {
+        const minForFee = (netFee * sellPrice) / (spreadPer * 0.15 || 1);
+        recommended = Math.min(50000, Math.max(100, Math.round(minForFee / 50) * 50));
+      }
+
+      // rough rec profit
+      const recAfter = Math.max(recommended - netFee, 0);
+      const recCost = recommended * buyPrice * (1 + buyT) + recommended * buyPrice * (state.fees.bankPct / 100) + state.fees.bankFixedRub;
+      const recProc = recAfter * sellPrice * (1 - sellT) - recAfter * sellPrice * (state.fees.bankPct / 100) - state.fees.bankFixedRub;
+      const recProfit = recProc - recCost;
+
+      return {
+        id: `${buyQ.exchange}:${buyQ.bank || 'spot'}->${sellQ.exchange}:${sellQ.bank || 'spot'}`,
+        buyName: venue(buyQ),
+        sellName: venue(sellQ),
+        path: `${venue(buyQ)} → ${venue(sellQ)}`,
+        buyPrice, sellPrice,
+        spreadPct: +spreadPct.toFixed(4),
+        profitPct: +profitPct.toFixed(4),
+        profitRub: +profitRub.toFixed(2),
+        amountUsdt: amount,
+        recommendedAmountUsdt: recommended,
+        recommendedProfitRub: +recProfit.toFixed(2),
+        network: state.network,
+        networkFeeUsdt: netFee,
+        simulated: !!(buyQ.simulated || sellQ.simulated),
+        fees: { buyTakerPct: buyT * 100, sellTakerPct: sellT * 100 },
+      };
+    }
+
+    function findArb(quotes) {
+      const tradeable = quotes.filter((q) => !q.estimated);
+      const pairs = [];
+      for (let i = 0; i < tradeable.length; i++) {
+        for (let j = 0; j < tradeable.length; j++) {
+          if (i === j) continue;
+          const row = calcPair(tradeable[i], tradeable[j]);
+          if (row) pairs.push(row);
+        }
+      }
+      pairs.sort((a, b) => b.profitPct - a.profitPct);
+      const above = pairs.filter((p) => p.profitPct >= state.minProfitPct);
+      return {
+        all: pairs,
+        opportunities: above.length ? above.slice(0, 50) : pairs.slice(0, 25),
+        aboveCount: above.length,
+        best: above[0] || pairs[0] || null,
+        showingBelowThreshold: above.length === 0,
+      };
+    }
+
+    // ---------- Demo quotes ----------
+    function jitter(n, seed) {
+      const x = Math.sin(seed * 12.9898 + n * 78.233) * 43758.5453;
+      return x - Math.floor(x);
+    }
+
+    async function fetchDemoQuotes() {
+      let mid = 85.2;
+      // try a few public sources from the browser
+      try {
+        const r = await fetch('https://api.rapira.net/open/market/rates', { signal: AbortSignal.timeout(5000) });
+        if (r.ok) {
+          const d = await r.json();
+          const row = (d.data || d || []).find((x) => x.symbol === 'USDT/RUB');
+          if (row) mid = (Number(row.bidPrice) + Number(row.askPrice)) / 2 || Number(row.close) || mid;
+        }
+      } catch {}
+      try {
+        const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=rub', { signal: AbortSignal.timeout(4000) });
+        if (r.ok) {
+          const d = await r.json();
+          if (d?.tether?.rub) mid = (mid + d.tether.rub) / 2;
+        }
+      } catch {}
+
+      const seed = Date.now() / 15000;
+      const mk = (exchange, type, bidOff, askOff, extra = {}) => {
+        const bid = mid * (1 + bidOff / 100);
+        const ask = mid * (1 + askOff / 100);
+        return {
+          exchange, type,
+          name: FEES_EX[exchange]?.name || exchange,
+          bid, ask, mid: (bid + ask) / 2,
+          ...extra,
+        };
+      };
+
+      const banks = [
+        { id: 'sber', name: 'Сбер' },
+        { id: 'tinkoff', name: 'Тинькофф' },
+        { id: 'alfa', name: 'Альфа' },
+      ];
+
+      const quotes = [
+        mk('rapira', 'spot', -0.02, 0.02, { source: 'rapira/live-or-demo' }),
+        mk('binance', 'spot', -0.05 + jitter(1, seed) * 0.08, 0.05 + jitter(2, seed) * 0.08, { source: 'demo-spot', estimated: true }),
+        mk('bybit', 'spot', -0.08 + jitter(3, seed) * 0.1, 0.06 + jitter(4, seed) * 0.1, { source: 'demo-spot', estimated: true }),
+        mk('kucoin', 'spot', -0.06, 0.07, { source: 'demo-spot', estimated: true }),
+      ];
+
+      banks.forEach((b, i) => {
+        const bias = { sber: 0.08, tinkoff: 0, alfa: 0.05 }[b.id];
+        const buyP = 0.35 + bias + jitter(10 + i, seed) * 0.35;
+        const sellD = 0.25 + bias * 0.5 + jitter(20 + i, seed) * 0.3;
+        quotes.push(mk('p2p_binance', 'p2p', -sellD, buyP, { bank: b.id, bankName: b.name, source: 'demo-p2p', simulated: true }));
+        quotes.push(mk('p2p_bybit', 'p2p', -sellD - 0.05, buyP - 0.05, { bank: b.id, bankName: b.name, source: 'demo-p2p', simulated: true }));
+        quotes.push(mk('p2p_kucoin', 'p2p', -sellD + 0.05, buyP + 0.1, { bank: b.id, bankName: b.name, source: 'demo-p2p', simulated: true }));
+      });
+
+      quotes.push(mk('bestchange', 'p2p', -0.18, 0.18, { bank: 'any', bankName: 'Банк. перевод', source: 'demo-bc', simulated: true }));
+      quotes.push(mk('bestchange', 'p2p', -0.28, 0.28, { bank: 'any', bankName: 'Банк. перевод', source: 'demo-bc', simulated: true }));
+
+      // inject a small random arb sometimes for demo visibility
+      if (jitter(99, seed) > 0.55) {
+        quotes.push(mk('rapira', 'spot', -0.15, -0.1, { source: 'demo-edge' }));
+      }
+
+      return { quotes, spotMid: mid, ts: Date.now() };
+    }
+
+    async function demoTick() {
+      const { quotes, spotMid, ts } = await fetchDemoQuotes();
+      const arb = findArb(quotes);
+      state.quotes = quotes;
+      state.spotMid = spotMid;
+      state.opportunities = arb.opportunities;
+      state.best = arb.best;
+      state.meta = {
+        count: arb.aboveCount,
+        showingBelowThreshold: arb.showingBelowThreshold,
+        simulatedCount: quotes.filter((q) => q.simulated).length,
+        totalEvaluated: arb.all.length,
+      };
+      state.history.push({
+        ts,
+        bestProfitPct: arb.best?.profitPct ?? 0,
+        bestSpreadPct: arb.best?.spreadPct ?? 0,
+      });
+      if (state.history.length > 720) state.history = state.history.slice(-720);
+      render(ts);
+    }
+
+    // ---------- API / WS ----------
+    function apiUrl(path) {
+      const base = (state.apiBase || 'http://localhost:3001').replace(/\/$/, '');
+      return `${base}${path}`;
+    }
+
+    function wsUrl() {
+      const base = (state.apiBase || 'http://localhost:3001').replace(/\/$/, '');
+      const u = new URL(base);
+      u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+      u.pathname = '/ws';
+      u.search = '';
+      return u.toString();
+    }
+
+    async function connectApi() {
+      state.apiBase = $('apiBase').value.trim() || 'http://localhost:3001';
+      localStorage.setItem('arb_api', state.apiBase);
+      try {
+        const r = await fetch(apiUrl('/api/health'), { signal: AbortSignal.timeout(4000) });
+        if (!r.ok) throw new Error('health failed');
+        state.mode = 'api';
+        state.connected = true;
+        $('modeBanner').innerHTML = `Режим: <strong>API</strong> · ${state.apiBase}`;
+        connectWs();
+        const st = await fetch(apiUrl('/api/state')).then((x) => x.json());
+        applyServerState(st);
+        setLive(true);
+        return true;
+      } catch (e) {
+        state.mode = 'demo';
+        state.connected = false;
+        setLive(false);
+        $('modeBanner').innerHTML =
+          `Не удалось подключить API (<code>${state.apiBase}</code>). Работает <strong>demo</strong>.`;
+        return false;
+      }
+    }
+
+    function connectWs() {
+      try { state.ws?.close(); } catch {}
+      try {
+        const ws = new WebSocket(wsUrl());
+        state.ws = ws;
+        ws.onopen = () => setLive(true);
+        ws.onclose = () => setLive(false);
+        ws.onerror = () => setLive(false);
+        ws.onmessage = (ev) => {
+          let msg;
+          try { msg = JSON.parse(ev.data); } catch { return; }
+          if (msg.type === 'hello') applyServerState(msg.payload || {});
+          if (msg.type === 'snapshot') applySnapshot(msg.payload);
+          if (msg.type === 'history') {
+            state.history = msg.payload || [];
+            drawChart();
+            $('histCount').textContent = `${state.history.length} точек`;
+          }
+          if (msg.type === 'status') {
+            state.running = !!msg.payload?.running;
+            setRunningUi();
+          }
+        };
+      } catch {
+        setLive(false);
+      }
+    }
+
+    function applyServerState(st) {
+      if (st.settings) {
+        state.minProfitPct = st.settings.minProfitPct ?? state.minProfitPct;
+        state.amountUsdt = st.settings.amountUsdt ?? state.amountUsdt;
+        state.network = st.settings.network || state.network;
+        if (st.settings.fees) state.fees = { ...state.fees, ...st.settings.fees };
+        syncControlsFromState();
+      }
+      state.running = !!st.running;
+      if (st.history) state.history = st.history;
+      if (st.snapshot) applySnapshot(st.snapshot);
+      setRunningUi();
+    }
+
+    function applySnapshot(snap) {
+      if (!snap) return;
+      state.quotes = snap.quotes || [];
+      state.opportunities = snap.opportunities || [];
+      state.best = snap.best;
+      state.spotMid = snap.spotMid;
+      state.meta = snap.meta || {};
+      render(snap.ts);
+    }
+
+    async function start() {
+      state.running = true;
+      setRunningUi();
+      if (state.mode === 'api' && state.connected) {
+        if (state.ws?.readyState === 1) {
+          state.ws.send(JSON.stringify({ type: 'start' }));
+        } else {
+          await fetch(apiUrl('/api/scanner/start'), { method: 'POST' });
+        }
+      } else {
+        await demoTick();
+        clearInterval(state.timer);
+        state.timer = setInterval(demoTick, 5000);
+      }
+    }
+
+    async function stop() {
+      state.running = false;
+      setRunningUi();
+      clearInterval(state.timer);
+      state.timer = null;
+      if (state.mode === 'api' && state.connected) {
+        if (state.ws?.readyState === 1) state.ws.send(JSON.stringify({ type: 'stop' }));
+        else await fetch(apiUrl('/api/scanner/stop'), { method: 'POST' }).catch(() => {});
+      }
+    }
+
+    function pushSettings() {
+      if (state.mode === 'api' && state.ws?.readyState === 1) {
+        state.ws.send(JSON.stringify({
+          type: 'settings',
+          payload: {
+            minProfitPct: state.minProfitPct,
+            amountUsdt: state.amountUsdt,
+            network: state.network,
+            fees: state.fees,
+          },
+        }));
+      } else if (state.mode === 'demo' && state.quotes.length) {
+        const arb = findArb(state.quotes);
+        state.opportunities = arb.opportunities;
+        state.best = arb.best;
+        state.meta = {
+          ...state.meta,
+          count: arb.aboveCount,
+          showingBelowThreshold: arb.showingBelowThreshold,
+        };
+        render(Date.now());
+      }
+    }
+
+    // ---------- UI ----------
+    function setLive(on) {
+      state.connected = on || state.mode === 'demo';
+      $('dotLive').className = 'dot ' + (on || state.mode === 'demo' ? 'on' : 'off');
+      $('lblLive').textContent = state.mode === 'api'
+        ? (on ? 'WebSocket/API' : 'API offline')
+        : 'demo';
+    }
+
+    function setRunningUi() {
+      const btn = $('btnScan');
+      btn.textContent = state.running ? '■ Остановить сканер' : '▶ Запустить сканер';
+      btn.classList.toggle('running', state.running);
+      $('dotRun').className = 'dot ' + (state.running ? 'on' : 'off');
+      $('lblRun').textContent = state.running ? 'Сканирование 5с' : 'Стоп';
+    }
+
+    function badgeClass(v) {
+      if (v >= 1) return 'good';
+      if (v >= 0.3) return 'ok';
+      if (v >= 0) return 'low';
+      return 'bad';
+    }
+
+    function render(ts) {
+      $('spotMid').textContent = state.spotMid != null ? `${fmt(state.spotMid, 2)} ₽` : '—';
+      const bp = state.best?.profitPct;
+      const el = $('bestProfit');
+      el.textContent = bp != null ? `${fmt(bp, 3)}%` : '—';
+      el.className = bp != null && bp >= 0 ? 'pos' : '';
+      $('oppCount').textContent = state.meta.count ?? 0;
+      $('updated').textContent = fmtTime(ts);
+
+      $('tableHint').textContent =
+        `порог ${state.minProfitPct}% · объём ${state.amountUsdt} USDT · ${state.network}` +
+        (state.meta.showingBelowThreshold ? ' · нет пар ≥ порога — показаны лучшие' : '');
+
+      if (state.meta.simulatedCount > 0) {
+        $('simBanner').hidden = false;
+        $('simBanner').textContent =
+          `Часть котировок synthetic/demo (${state.meta.simulatedCount}). Для live P2P подключите бэкенд в доступном регионе.`;
+      } else {
+        $('simBanner').hidden = true;
+      }
+
+      const rows = state.opportunities || [];
+      const tb = $('tbody');
+      if (!rows.length) {
+        tb.innerHTML = '';
+        $('tableEmpty').hidden = false;
+      } else {
+        $('tableEmpty').hidden = true;
+        tb.innerHTML = rows.map((r, i) => `
+          <tr>
+            <td class="mono muted">${i + 1}</td>
+            <td><div class="venue">${esc(r.buyName)}</div><div class="sub mono">${fmt(r.buyPrice, 2)} ₽</div></td>
+            <td><div class="venue">${esc(r.sellName)}</div><div class="sub mono">${fmt(r.sellPrice, 2)} ₽</div></td>
+            <td class="mono">${fmt(r.buyPrice, 3)}</td>
+            <td class="mono">${fmt(r.sellPrice, 3)}</td>
+            <td class="mono">${fmt(r.spreadPct, 3)}%</td>
+            <td><span class="badge ${badgeClass(r.profitPct)}">${fmt(r.profitPct, 3)}%</span></td>
+            <td class="mono ${r.profitRub >= 0 ? 'pos' : 'neg'}">
+              ${fmt(r.profitRub, 2)} ₽
+              <div class="sub">на ${fmt(r.amountUsdt, 0)} USDT</div>
+            </td>
+            <td class="mono">${fmt(r.recommendedAmountUsdt, 0)}
+              <div class="sub pos">${fmt(r.recommendedProfitRub, 0)} ₽</div>
+            </td>
+            <td>
+              <span class="chip">${esc(r.network)}</span>
+              ${r.simulated ? '<span class="chip warn">sim</span>' : ''}
+            </td>
+          </tr>
+        `).join('');
+      }
+
+      // quotes
+      const spot = state.quotes.filter((q) => q.type === 'spot');
+      const p2p = state.quotes.filter((q) => q.type === 'p2p');
+      $('spotPill').textContent = `mid ≈ ${fmt(state.spotMid, 2)} ₽`;
+      $('p2pPill').textContent = `${p2p.length} источников`;
+      $('spotList').innerHTML = spot.map(qRow).join('') || '<div class="muted">Нет spot-котировок</div>';
+      $('p2pList').innerHTML = p2p.map(qRow).join('') || '<div class="muted">Нет P2P-котировок</div>';
+
+      if (state.best) {
+        $('bestPanel').hidden = false;
+        const b = state.best;
+        $('bestGrid').innerHTML = `
+          <div><span class="label">Путь</span><strong>${esc(b.path)}</strong></div>
+          <div><span class="label">Спред / профит</span><strong>${fmt(b.spreadPct, 3)}% / ${fmt(b.profitPct, 3)}%</strong></div>
+          <div><span class="label">Чистая прибыль</span><strong class="pos">${fmt(b.profitRub, 2)} ₽</strong></div>
+          <div><span class="label">Рекомендуемый объём</span><strong>${fmt(b.recommendedAmountUsdt, 0)} USDT → ${fmt(b.recommendedProfitRub, 0)} ₽</strong></div>
+          <div><span class="label">Сеть</span><strong class="mono">${esc(b.network)} · fee ${b.networkFeeUsdt} USDT</strong></div>
+        `;
+      } else {
+        $('bestPanel').hidden = true;
+      }
+
+      $('histCount').textContent = `${state.history.length} точек`;
+      drawChart();
+    }
+
+    function qRow(q) {
+      return `
+        <div class="quote-row">
+          <div>
+            <strong>${esc(q.name || q.exchange)}${q.bankName ? ' · ' + esc(q.bankName) : ''}${q.estimated ? ' · est' : ''}</strong>
+            <div class="sub">${q.simulated ? 'synthetic · ' : ''}${esc(q.source || '')}</div>
+          </div>
+          <div class="q-prices">
+            <span class="bid">${q.type === 'p2p' ? 'sell' : 'bid'} ${fmt(q.bid, 3)}</span>
+            <span class="ask">${q.type === 'p2p' ? 'buy' : 'ask'} ${fmt(q.ask, 3)}</span>
+          </div>
+        </div>`;
+    }
+
+    function esc(s) {
+      return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function drawChart() {
+      const canvas = $('chart');
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth || 600;
+      const h = canvas.clientHeight || 260;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      const data = state.history;
+      if (data.length < 2) {
+        ctx.fillStyle = '#8b9bb4';
+        ctx.font = '14px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('График появится после нескольких тиков сканера', w / 2, h / 2);
+        return;
+      }
+
+      const pad = { l: 48, r: 16, t: 16, b: 28 };
+      const vals = data.flatMap((d) => [d.bestProfitPct || 0, d.bestSpreadPct || 0]);
+      let min = Math.min(...vals, 0);
+      let max = Math.max(...vals, 0.1);
+      const span = max - min || 1;
+      min -= span * 0.1;
+      max += span * 0.1;
+
+      const X = (i) => pad.l + (i / (data.length - 1)) * (w - pad.l - pad.r);
+      const Y = (v) => pad.t + (1 - (v - min) / (max - min)) * (h - pad.t - pad.b);
+
+      // grid
+      ctx.strokeStyle = 'rgba(148,163,184,0.12)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.t + ((h - pad.t - pad.b) * i) / 4;
+        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+        const val = max - ((max - min) * i) / 4;
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '11px var(--mono), monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(val.toFixed(2) + '%', pad.l - 6, y + 3);
+      }
+
+      function area(key, stroke, fillFrom, fillTo) {
+        ctx.beginPath();
+        data.forEach((d, i) => {
+          const x = X(i), y = Y(d[key] || 0);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.lineTo(X(data.length - 1), Y(min));
+        ctx.lineTo(X(0), Y(min));
+        ctx.closePath();
+        const g = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
+        g.addColorStop(0, fillFrom);
+        g.addColorStop(1, fillTo);
+        ctx.fillStyle = g;
+        ctx.fill();
+      }
+
+      area('bestSpreadPct', '#60a5fa', 'rgba(96,165,250,0.28)', 'rgba(96,165,250,0)');
+      area('bestProfitPct', '#34d399', 'rgba(52,211,153,0.35)', 'rgba(52,211,153,0)');
+
+      // legend
+      ctx.font = '12px system-ui';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#34d399'; ctx.fillRect(pad.l, 8, 10, 10);
+      ctx.fillStyle = '#cbd5e1'; ctx.fillText('Лучшая прибыль %', pad.l + 16, 17);
+      ctx.fillStyle = '#60a5fa'; ctx.fillRect(pad.l + 160, 8, 10, 10);
+      ctx.fillStyle = '#cbd5e1'; ctx.fillText('Лучший спред %', pad.l + 176, 17);
+    }
+
+    function syncControlsFromState() {
+      $('minProfit').value = state.minProfitPct;
+      $('amount').value = state.amountUsdt;
+      $('bankPct').value = state.fees.bankPct;
+      $('bankFix').value = state.fees.bankFixedRub;
+      $('trcFee').value = state.fees.trc20Usdt;
+      $('vMin').textContent = Number(state.minProfitPct).toFixed(2) + '%';
+      $('vAmt').textContent = state.amountUsdt;
+      $('vBankPct').textContent = Number(state.fees.bankPct).toFixed(2) + '%';
+      $('vBankFix').textContent = (state.fees.bankFixedRub || 0) + ' ₽';
+      $('vTrc').textContent = (state.fees.trc20Usdt ?? 1) + ' USDT';
+      $('feeTrc').textContent = (state.fees.trc20Usdt ?? 1) + ' USDT';
+      $('feeBep').textContent = (state.fees.bep20Usdt ?? 0.3) + ' USDT';
+      document.querySelectorAll('.seg button').forEach((b) => {
+        b.classList.toggle('active', b.dataset.net === state.network);
+      });
+    }
+
+    // events
+    $('btnScan').onclick = () => (state.running ? stop() : start());
+    $('btnConnect').onclick = () => connectApi();
+    $('apiBase').value = state.apiBase;
+
+    $('minProfit').oninput = (e) => {
+      state.minProfitPct = Number(e.target.value);
+      $('vMin').textContent = state.minProfitPct.toFixed(2) + '%';
+      pushSettings();
+    };
+    $('amount').oninput = (e) => {
+      state.amountUsdt = Number(e.target.value);
+      $('vAmt').textContent = state.amountUsdt;
+      pushSettings();
+    };
+    $('bankPct').oninput = (e) => {
+      state.fees.bankPct = Number(e.target.value);
+      $('vBankPct').textContent = state.fees.bankPct.toFixed(2) + '%';
+      pushSettings();
+    };
+    $('bankFix').oninput = (e) => {
+      state.fees.bankFixedRub = Number(e.target.value);
+      $('vBankFix').textContent = state.fees.bankFixedRub + ' ₽';
+      pushSettings();
+    };
+    $('trcFee').oninput = (e) => {
+      state.fees.trc20Usdt = Number(e.target.value);
+      $('vTrc').textContent = state.fees.trc20Usdt + ' USDT';
+      $('feeTrc').textContent = state.fees.trc20Usdt + ' USDT';
+      pushSettings();
+    };
+    document.querySelectorAll('.seg button').forEach((b) => {
+      b.onclick = () => {
+        state.network = b.dataset.net;
+        document.querySelectorAll('.seg button').forEach((x) => x.classList.toggle('active', x === b));
+        pushSettings();
+      };
+    });
+
+    window.addEventListener('resize', drawChart);
+
+    // boot: try API, else demo
+    setLive(false);
+    setRunningUi();
+    drawChart();
+    (async () => {
+      $('apiBase').value = state.apiBase || 'http://localhost:3001';
+      const ok = await connectApi();
+      if (!ok) {
+        state.mode = 'demo';
+        setLive(true);
+        $('modeBanner').innerHTML =
+          'Режим: <strong>локальный demo</strong>. Расчёт в браузере. Для live API укажите адрес бэкенда и нажмите «Подключить API».';
+      }
+    })();
+  })();
+  </script>
+</body>
+</html>
